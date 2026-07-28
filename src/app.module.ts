@@ -2,7 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
+import { APP_GUARD } from '@nestjs/core';
 import configuration, { configValidationSchema } from './config/configuration';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { BearerTokenGuard } from './common/guards/bearer-token.guard';
 
 @Module({
   imports: [
@@ -24,6 +28,9 @@ import configuration, { configValidationSchema } from './config/configuration';
         synchronize: false,
       }),
     }),
+    AuthModule,
+    UsersModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: BearerTokenGuard }],
 })
 export class AppModule {}
