@@ -8,6 +8,10 @@ import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
 import { AuthService } from '../../auth/auth.service';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { IS_OPTIONAL_AUTH_KEY } from '../decorators/optional-auth.decorator';
+import type { User } from '../../users/entities/user.entity';
+
+type RequestWithUser = Request & { user?: User };
 
 @Injectable()
 export class BearerTokenGuard implements CanActivate {
@@ -21,18 +25,27 @@ export class BearerTokenGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) {
+    const isOptionalAuth = this.reflector.getAllAndOverride<boolean>(
+      IS_OPTIONAL_AUTH_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    const request = context.switchToHttp().getRequest<RequestWithUser>();
+    const token = this.extractToken(request);
+
+    if (isPublic && !isOptionalAuth) {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<Request>();
-    const token = this.extractToken(request);
     if (!token) {
+      if (isPublic || isOptionalAuth) {
+        return true;
+      }
       throw new UnauthorizedException('Missing bearer token');
     }
 
     const user = await this.authService.validateToken(token);
-    (request as Request & { user: typeof user }).user = user;
+    request.user = user;
     return true;
   }
 

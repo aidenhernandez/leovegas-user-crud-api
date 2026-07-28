@@ -56,7 +56,12 @@ export class TypeOrmUsersRepository implements IUsersRepository {
       role: data.role,
       accessToken: null,
     });
-    return this.repository.save(user);
+    const saved = await this.repository.save(user);
+    const created = await this.findById(saved.id);
+    if (!created) {
+      throw new Error(`User ${saved.id} disappeared immediately after creation`);
+    }
+    return created;
   }
 
   async update(id: string, data: UpdateUserData): Promise<User> {

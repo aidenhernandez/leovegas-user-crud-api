@@ -17,7 +17,8 @@ const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password';
 @Injectable()
 export class AuthService {
   constructor(
-    @Inject(USERS_REPOSITORY) private readonly usersRepository: IUsersRepository,
+    @Inject(USERS_REPOSITORY)
+    private readonly usersRepository: IUsersRepository,
     @Inject(PASSWORD_HASHER) private readonly passwordHasher: IPasswordHasher,
     @Inject(TOKEN_GENERATOR) private readonly tokenGenerator: ITokenGenerator,
   ) {}
@@ -28,7 +29,10 @@ export class AuthService {
       throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
 
-    const passwordMatches = await this.passwordHasher.compare(password, user.password);
+    const passwordMatches = await this.passwordHasher.compare(
+      password,
+      user.password,
+    );
     if (!passwordMatches) {
       throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
