@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import configuration, { configValidationSchema } from './config/configuration';
-import type { AppConfig } from './config/configuration';
 
 @Module({
   imports: [
@@ -13,13 +13,13 @@ import type { AppConfig } from './config/configuration';
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService<AppConfig, true>) => ({
-        type: 'mysql' as const,
-        host: config.get('database.host', { infer: true }),
-        port: config.get('database.port', { infer: true }),
-        username: config.get('database.username', { infer: true }),
-        password: config.get('database.password', { infer: true }),
-        database: config.get('database.database', { infer: true }),
+      useFactory: (config: ConfigService): TypeOrmModuleOptions => ({
+        type: 'mysql',
+        host: config.get<string>('database.host'),
+        port: config.get<number>('database.port'),
+        username: config.get<string>('database.username'),
+        password: config.get<string>('database.password'),
+        database: config.get<string>('database.database'),
         autoLoadEntities: true,
         synchronize: false,
       }),

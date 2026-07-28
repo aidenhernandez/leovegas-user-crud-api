@@ -11,7 +11,9 @@ export const configValidationSchema = Joi.object({
 
   BCRYPT_SALT_ROUNDS: Joi.number().default(10),
 
-  ADMIN_SEED_EMAIL: Joi.string().email().required(),
+  ADMIN_SEED_EMAIL: Joi.string()
+    .email({ tlds: { allow: false } })
+    .required(),
   ADMIN_SEED_PASSWORD: Joi.string().min(8).required(),
 });
 
