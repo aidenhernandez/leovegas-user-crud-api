@@ -1,98 +1,186 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# leovegas-user-api
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A RESTful CRUD API for a `User` resource (`name`, `email`, `password`, `role: USER|ADMIN`,
+`access_token`), built with NestJS, MySQL, and TypeORM. Responses and errors follow the
+[JSON:API](https://jsonapi.org/) specification, authorization is split between coarse
+role-based gating and a fine-grained self-vs-other access policy, and every cross-layer
+dependency is injected via an interface so the business logic is unit-testable without a
+real database.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Stack
 
-## Description
+- **NestJS** + TypeScript
+- **MySQL** via **TypeORM** (repository pattern behind DI interfaces, migrations only —
+  `synchronize` is always `false`)
+- **class-validator** / **class-transformer** for request validation
+- **bcrypt** for password hashing, an opaque persisted token (not JWT) for auth
+- **Jest** for unit tests (all dependencies mocked/faked — no real DB in specs)
+- **Docker Compose** for local MySQL
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Project layout
 
-## Project setup
-
-```bash
-$ npm install
+```
+src/
+  common/       # cross-cutting: JSON:API envelope/filter/pipe, guards, decorators, domain exceptions
+  users/        # entity, repository, access policy, service, controller, DTOs, serializer
+  auth/         # login, password hashing, token generation
+  config/       # env validation (Joi) + typed config
+migrations/     # TypeORM migrations
+scripts/        # seed-admin.ts
 ```
 
-## Compile and run the project
+Unit tests live in a `__tests__/` directory next to the files they cover (e.g.
+`src/users/policies/__tests__/user-access.policy.spec.ts`), not co-located `*.spec.ts` files.
+
+## Setup
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
+cp .env.example .env      # adjust values if needed
+docker compose up -d      # starts MySQL on localhost:3306
+npm run migration:run
+npm run seed:admin        # bootstraps the first ADMIN from ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD
+npm run start:dev
 ```
 
-## Run tests
+The API is served under the `/api` prefix, e.g. `http://localhost:3000/api/users`.
+
+## Available scripts
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run start:dev         # dev server, watch mode
+npm run build              # production build
+npm test                   # unit tests (no DB required)
+npm run test:cov           # unit tests with coverage
+npm run lint                # eslint --fix
+npm run migration:generate  # generate a new migration from entity changes
+npm run migration:run
+npm run migration:revert
+npm run seed:admin          # idempotent — safe to re-run
 ```
 
-## Deployment
+## API overview
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+All request/response bodies use `Content-Type: application/json` or
+`application/vnd.api+json` (both accepted). Successful responses are wrapped in a JSON:API
+envelope; errors come back as `{ "errors": [...] }`.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Method | Path          | Auth                          | Notes                                             |
+| ------ | ------------- | ------------------------------ | -------------------------------------------------- |
+| POST   | `/auth/login` | none                           | body: `{ email, password }` → `{ user, accessToken }` |
+| POST   | `/users`      | optional                       | anonymous → self-registers as `USER`; ADMIN caller can set `role` |
+| GET    | `/users`      | ADMIN only                     | list all users                                      |
+| GET    | `/users/:id`  | self or ADMIN                  | non-ADMIN requesting another id gets `403`, not `404` |
+| PATCH  | `/users/:id`  | self (non-role fields) or ADMIN | changing `role` requires ADMIN                     |
+| PUT    | `/users/:id`  | same as PATCH                  | aliased to the same handler (partial update either way) |
+| DELETE | `/users/:id`  | ADMIN only, not self            | no one can delete their own account, including ADMIN |
+
+Authenticate with `Authorization: Bearer <accessToken>` from the login response.
+
+### Example: register, login, view self
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+curl -X POST localhost:3000/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Alice","email":"alice@example.com","password":"password123"}'
+
+curl -X POST localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"alice@example.com","password":"password123"}'
+# => { "user": {...}, "accessToken": "..." }
+
+curl localhost:3000/api/users/<alice-id> \
+  -H "Authorization: Bearer <accessToken>"
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### Success envelope
 
-## Resources
+```json
+{
+  "data": {
+    "type": "users",
+    "id": "82fcf9a3-8b6c-4f72-a15a-6259e5ab7a73",
+    "attributes": {
+      "name": "Alice",
+      "email": "alice@example.com",
+      "role": "USER",
+      "createdAt": "2026-07-29T06:55:51.332Z",
+      "updatedAt": "2026-07-29T06:55:51.332Z"
+    }
+  }
+}
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+`password` and `access_token` never appear in `attributes` — enforced twice, independently:
+the entity columns are `{ select: false }`, and the serializer explicitly whitelists which
+fields it reads.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Error envelope
 
-## Support
+Domain errors (403/404/409) and Nest's built-in guard/pipe errors all share the same shape:
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```json
+{ "errors": [{ "status": "403", "title": "Forbidden", "detail": "You may only view your own user record" }] }
+```
 
-## Stay in touch
+Validation failures (422) return one error per invalid field, each with a `source.pointer`:
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+```json
+{
+  "errors": [
+    { "status": "422", "title": "Unprocessable Entity", "detail": "email must be an email", "source": { "pointer": "/email" } },
+    { "status": "422", "title": "Unprocessable Entity", "detail": "password must be longer than or equal to 8 characters", "source": { "pointer": "/password" } }
+  ]
+}
+```
 
-## License
+## Design decisions worth calling out
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- **Opaque token, not JWT.** `access_token` is a column on the `User` row (per the spec's
+  literal data model), generated by `crypto.randomBytes` and looked up on every request. This
+  means a role promotion takes effect immediately on the next request — there's no
+  stale-JWT-claims problem to work around, at the cost of a DB read per request.
+- **Single `POST /users` for both registration and provisioning.** One code path: an
+  anonymous caller is always forced to `USER`; an authenticated ADMIN caller's requested
+  `role` is honored. Implemented via an `@OptionalAuth()` decorator + a guard that resolves
+  `request.user` if a token is present without requiring one.
+- **`RolesGuard` (coarse) vs. `UserAccessPolicy` (fine-grained).** Context-free rules
+  ("must be ADMIN") live in a guard driven by `@Roles()` metadata. Everything involving
+  "self vs. other" — view/list/update/delete — lives in a plain, framework-agnostic
+  `UserAccessPolicy` class with zero Nest imports, so it's testable with no mocks at all.
+- **A non-ADMIN requesting another user's id gets `403`, not `404`.** The access check runs
+  before the repository lookup, so a non-admin can never use response codes to fingerprint
+  which user ids exist.
+- **No one can delete their own account, including ADMIN.** A literal reading of the spec.
+  An ADMIN *can*, however, change their own role via `PATCH` — the spec only restricts that
+  for `USER` — documented and pinned by a dedicated test in `user-access.policy.spec.ts`.
+- **`JsonApiEnvelopeInterceptor` is scoped to `UsersController`, not global.** `POST
+  /auth/login` returns `{ user, accessToken }`, which isn't a single JSON:API resource object
+  — forcing it through the same envelope would require a special case that couples the
+  interceptor back to one route. The error filter, by contrast, *is* global: a uniform error
+  shape across the whole API (including auth errors) is a reasonable cross-cutting concern in
+  a way resource-enveloping isn't.
+- **Migrations, never `synchronize: true`.** More representative of how this would run in
+  production.
+- **Unit tests only, no e2e.** The spec calls for unit tests; all service/policy/guard/
+  controller specs run against mocked interfaces with no real DB or HTTP server. Every phase
+  was additionally verified manually against real Dockerized MySQL via curl during
+  development (documented per-phase in `PROJECT_NOTES.md`), but that verification isn't
+  encoded as automated e2e tests.
+
+## SOLID mapping
+
+- **SRP** — controller (HTTP), service (orchestration), repository (persistence), policy
+  (authorization), serializer (output shaping), hasher/token-generator (crypto) are all
+  separate classes.
+- **OCP** — a new resource type needs a new serializer, not changes to
+  `JsonApiEnvelopeInterceptor`; a new domain exception needs a `status`/`title`/`message`,
+  not changes to `JsonApiExceptionFilter`.
+- **LSP** — any `IUsersRepository` implementation (e.g. an in-memory test double) substitutes
+  cleanly wherever the interface is depended on.
+- **ISP** — `IUsersRepository` is a narrow domain contract, not the raw TypeORM
+  `Repository`/`QueryBuilder` API; `IUserAccessPolicy` exposes only the four checks the
+  domain actually needs.
+- **DIP** — `UsersService`/`AuthService` depend only on interfaces/DI tokens
+  (`IUsersRepository`, `IPasswordHasher`, `ITokenGenerator`, `IUserAccessPolicy`), never a
+  concrete TypeORM/bcrypt/crypto class — this is what keeps every unit test DB-free.
