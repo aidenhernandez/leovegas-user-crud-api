@@ -1,10 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Inject,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { User } from './entities/user.entity';
 import { Role } from './entities/role.enum';
 import { USERS_REPOSITORY } from './repositories/users-repository.interface';
@@ -15,6 +9,9 @@ import { PASSWORD_HASHER } from '../auth/hashing/password-hasher.interface';
 import type { IPasswordHasher } from '../auth/hashing/password-hasher.interface';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ForbiddenActionException } from '../common/exceptions/forbidden-action.exception';
+import { UserNotFoundException } from '../common/exceptions/user-not-found.exception';
+import { DuplicateEmailException } from '../common/exceptions/duplicate-email.exception';
 
 @Injectable()
 export class UsersService {
@@ -29,7 +26,7 @@ export class UsersService {
   async create(dto: CreateUserDto, requester?: User): Promise<User> {
     const emailTaken = await this.usersRepository.existsByEmail(dto.email);
     if (emailTaken) {
-      throw new ConflictException('Email already in use');
+      throw new DuplicateEmailException(dto.email);
     }
 
     const role =
@@ -45,19 +42,21 @@ export class UsersService {
 
   async findAll(requester: User): Promise<User[]> {
     if (!this.accessPolicy.canList(requester)) {
-      throw new ForbiddenException('Only administrators can list users');
+      throw new ForbiddenActionException('Only administrators can list users');
     }
     return this.usersRepository.findAll();
   }
 
   async findOne(requester: User, targetId: string): Promise<User> {
     if (!this.accessPolicy.canView(requester, targetId)) {
-      throw new ForbiddenException('You may only view your own user record');
+      throw new ForbiddenActionException(
+        'You may only view your own user record',
+      );
     }
 
     const user = await this.usersRepository.findById(targetId);
     if (!user) {
-      throw new NotFoundException(`User ${targetId} not found`);
+      throw new UserNotFoundException(targetId);
     }
     return user;
   }
@@ -69,18 +68,20 @@ export class UsersService {
   ): Promise<User> {
     const isRoleChange = dto.role !== undefined;
     if (!this.accessPolicy.canUpdate(requester, targetId, isRoleChange)) {
-      throw new ForbiddenException('You are not allowed to update this user');
+      throw new ForbiddenActionException(
+        'You are not allowed to update this user',
+      );
     }
 
     const existing = await this.usersRepository.findById(targetId);
     if (!existing) {
-      throw new NotFoundException(`User ${targetId} not found`);
+      throw new UserNotFoundException(targetId);
     }
 
     if (dto.email && dto.email !== existing.email) {
       const emailTaken = await this.usersRepository.existsByEmail(dto.email);
       if (emailTaken) {
-        throw new ConflictException('Email already in use');
+        throw new DuplicateEmailException(dto.email);
       }
     }
 
@@ -98,12 +99,14 @@ export class UsersService {
 
   async remove(requester: User, targetId: string): Promise<void> {
     if (!this.accessPolicy.canDelete(requester, targetId)) {
-      throw new ForbiddenException('You are not allowed to delete this user');
+      throw new ForbiddenActionException(
+        'You are not allowed to delete this user',
+      );
     }
 
     const existing = await this.usersRepository.findById(targetId);
     if (!existing) {
-      throw new NotFoundException(`User ${targetId} not found`);
+      throw new UserNotFoundException(targetId);
     }
 
     await this.usersRepository.delete(targetId);

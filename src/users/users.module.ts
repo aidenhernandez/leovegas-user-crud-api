@@ -7,6 +7,7 @@ import { USER_ACCESS_POLICY } from './policies/user-access-policy.interface';
 import { UserAccessPolicy } from './policies/user-access.policy';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
+import { UserSerializer } from './serializers/user.serializer';
 import { HashingModule } from '../auth/hashing/hashing.module';
 
 @Module({
@@ -14,6 +15,7 @@ import { HashingModule } from '../auth/hashing/hashing.module';
   controllers: [UsersController],
   providers: [
     UsersService,
+    UserSerializer,
     {
       provide: USERS_REPOSITORY,
       useClass: TypeOrmUsersRepository,

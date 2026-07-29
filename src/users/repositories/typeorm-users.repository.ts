@@ -59,7 +59,9 @@ export class TypeOrmUsersRepository implements IUsersRepository {
     const saved = await this.repository.save(user);
     const created = await this.findById(saved.id);
     if (!created) {
-      throw new Error(`User ${saved.id} disappeared immediately after creation`);
+      throw new Error(
+        `User ${saved.id} disappeared immediately after creation`,
+      );
     }
     return created;
   }
