@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { DomainException } from '../exceptions/domain.exception';
+import { ValidationException } from '../exceptions/validation.exception';
 import {
   JSON_API_CONTENT_TYPE,
   JsonApiErrorObject,
@@ -33,25 +34,34 @@ const DEFAULT_TITLES: Partial<Record<number, string>> = {
 export class JsonApiExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
-    const { status, error } = this.toErrorObject(exception);
+    const { status, errors } = this.toErrorResponse(exception);
 
     response.status(status);
     response.setHeader('Content-Type', JSON_API_CONTENT_TYPE);
-    response.json({ errors: [error] } satisfies JsonApiErrorResponse);
+    response.json({ errors } satisfies JsonApiErrorResponse);
   }
 
-  private toErrorObject(exception: unknown): {
+  private toErrorResponse(exception: unknown): {
     status: number;
-    error: JsonApiErrorObject;
+    errors: JsonApiErrorObject[];
   } {
+    if (exception instanceof ValidationException) {
+      return {
+        status: HttpStatus.UNPROCESSABLE_ENTITY,
+        errors: exception.errors,
+      };
+    }
+
     if (exception instanceof DomainException) {
       return {
         status: exception.status,
-        error: {
-          status: String(exception.status),
-          title: exception.title,
-          detail: exception.message,
-        },
+        errors: [
+          {
+            status: String(exception.status),
+            title: exception.title,
+            detail: exception.message,
+          },
+        ],
       };
     }
 
@@ -59,21 +69,25 @@ export class JsonApiExceptionFilter implements ExceptionFilter {
       const status = exception.getStatus();
       return {
         status,
-        error: {
-          status: String(status),
-          title: DEFAULT_TITLES[status] ?? exception.name,
-          detail: this.extractDetail(exception),
-        },
+        errors: [
+          {
+            status: String(status),
+            title: DEFAULT_TITLES[status] ?? exception.name,
+            detail: this.extractDetail(exception),
+          },
+        ],
       };
     }
 
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
-      error: {
-        status: String(HttpStatus.INTERNAL_SERVER_ERROR),
-        title: DEFAULT_TITLES[HttpStatus.INTERNAL_SERVER_ERROR]!,
-        detail: 'An unexpected error occurred',
-      },
+      errors: [
+        {
+          status: String(HttpStatus.INTERNAL_SERVER_ERROR),
+          title: DEFAULT_TITLES[HttpStatus.INTERNAL_SERVER_ERROR]!,
+          detail: 'An unexpected error occurred',
+        },
+      ],
     };
   }
 

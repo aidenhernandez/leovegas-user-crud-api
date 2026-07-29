@@ -36,4 +36,13 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
+  {
+    files: ['**/__tests__/**/*.ts'],
+    rules: {
+      // expect(mock.method).toHaveBeenCalled() passes a detached method
+      // reference on purpose - Jest never invokes it with a `this`, so this
+      // rule's false-positive doesn't apply to spec files.
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
 );
