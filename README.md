@@ -45,6 +45,88 @@ npm run start:dev
 
 The API is served under the `/api` prefix, e.g. `http://localhost:3000/api/users`.
 
+## Docker / MySQL
+
+MySQL runs as a single Docker Compose service named `mysql`, defined in
+`docker-compose.yml`, with its data persisted in a named volume (`mysql_data`) so it survives
+container restarts. Credentials come from `docker-compose.yml`'s `environment` block and must
+match `DB_*` in your `.env`.
+
+If you've never used Docker before, all of the commands below are run from the project root
+(`leovegas-user-api/`), and `docker compose` (the container tool) is separate from `npm`
+(the Node tool) — you'll use both.
+
+**Start it for the first time, or after it's been removed:**
+
+```bash
+docker compose up -d
+```
+
+This creates and starts the `mysql` container in the background (`-d` = detached). Safe to
+run even if the container already exists — Compose won't recreate it unless the config
+changed. Wait a few seconds for MySQL to finish initializing, then confirm it's healthy:
+
+```bash
+docker compose ps
+# STATUS column should say "Up ... (healthy)"
+```
+
+If you're starting fresh (first run, or after removal), the schema won't exist yet — run
+migrations and seed the first admin before starting the app:
+
+```bash
+npm run migration:run
+npm run seed:admin
+```
+
+**Stop it** (keeps all data — the container and its volume stay on disk, just not running):
+
+```bash
+docker compose stop
+```
+
+**Start it again** after `stop` (same data, no migration/seed needed):
+
+```bash
+docker compose start
+```
+
+**Restart it** (stop + start in one step, e.g. after editing `docker-compose.yml`):
+
+```bash
+docker compose restart
+```
+
+**Remove the container entirely** but keep the data volume (container is gone, data isn't):
+
+```bash
+docker compose down
+```
+
+Bring it back with `docker compose up -d` — no re-migration needed, since the volume (and
+the data in it) is untouched.
+
+**Remove everything, including the data** (a true reset — you'll need to migrate + seed
+again):
+
+```bash
+docker compose down -v   # -v also deletes the mysql_data volume
+docker compose up -d
+npm run migration:run
+npm run seed:admin
+```
+
+**View logs** if something looks wrong (e.g. the app can't connect):
+
+```bash
+docker compose logs -f mysql   # Ctrl+C to stop following
+```
+
+**Common gotcha:** if `docker compose up -d` fails or the app can't connect, check that
+Docker Desktop (or your Docker daemon) is actually running first — `docker compose` commands
+need it, and the error messages when it's not running can be non-obvious (e.g. "Cannot
+connect to the Docker daemon").
+
 ## Available scripts
 
 ```bash
@@ -168,19 +250,79 @@ Validation failures (422) return one error per invalid field, each with a `sourc
   development (documented per-phase in `PROJECT_NOTES.md`), but that verification isn't
   encoded as automated e2e tests.
 
+## Object-oriented design
+
+The spec calls out OOP and SOLID as separate grading criteria, so this section covers the
+four OOP pillars specifically — SOLID (below) is about how the classes are arranged;
+this is about the classes themselves.
+
+- **Encapsulation** — `src/users/entities/user.entity.ts` marks `password`/`accessToken`
+  `{ select: false }` so they're hidden from default queries; `UsersService`
+  (`src/users/users.service.ts`) hides every collaborator behind `private readonly`
+  constructor properties, exposing only five public methods and no internal state;
+  `UserAccessPolicy` (`src/users/policies/user-access.policy.ts`) hides all of the
+  self-vs-other conditional logic behind four public yes/no methods — callers never see the
+  branching, just the answer.
+- **Abstraction** — `IUsersRepository`, `IUserAccessPolicy`, `IPasswordHasher`,
+  `ITokenGenerator`, and `IResourceSerializer` (one each in
+  `src/users/repositories/`, `src/users/policies/`, `src/auth/hashing/`, `src/auth/tokens/`,
+  `src/common/jsonapi/serializers/`) each define *what* a collaborator does without saying
+  *how* — `UsersService` calls `passwordHasher.hash(...)` with no idea it's bcrypt under the
+  hood.
+- **Inheritance** — `DomainException` (`src/common/exceptions/domain.exception.ts`) is an
+  abstract base class; `ForbiddenActionException`, `UserNotFoundException`, and
+  `DuplicateEmailException` each extend it, supplying only their own `status`/`title`/
+  constructor logic and inheriting the rest. `JsonApiValidationPipe`
+  (`src/common/pipes/jsonapi-validation.pipe.ts`) extends Nest's own `ValidationPipe`,
+  reusing its validation machinery and overriding only the `exceptionFactory`.
+- **Polymorphism** — `JsonApiExceptionFilter.catch()`
+  (`src/common/jsonapi/jsonapi-exception.filter.ts`) calls `exception.status`/`.title`/
+  `.message` on *any* `DomainException` without a per-subclass switch statement — each
+  concrete exception answers those calls its own way. Likewise, `UsersService` and
+  `AuthService` call methods on whatever `IUsersRepository` they were handed — the real
+  `TypeOrmUsersRepository` in production, a hand-written fake in
+  `src/users/__tests__/users.service.spec.ts` — with identical calling code either way.
+
 ## SOLID mapping
 
-- **SRP** — controller (HTTP), service (orchestration), repository (persistence), policy
-  (authorization), serializer (output shaping), hasher/token-generator (crypto) are all
-  separate classes.
-- **OCP** — a new resource type needs a new serializer, not changes to
-  `JsonApiEnvelopeInterceptor`; a new domain exception needs a `status`/`title`/`message`,
-  not changes to `JsonApiExceptionFilter`.
-- **LSP** — any `IUsersRepository` implementation (e.g. an in-memory test double) substitutes
-  cleanly wherever the interface is depended on.
-- **ISP** — `IUsersRepository` is a narrow domain contract, not the raw TypeORM
-  `Repository`/`QueryBuilder` API; `IUserAccessPolicy` exposes only the four checks the
-  domain actually needs.
-- **DIP** — `UsersService`/`AuthService` depend only on interfaces/DI tokens
-  (`IUsersRepository`, `IPasswordHasher`, `ITokenGenerator`, `IUserAccessPolicy`), never a
-  concrete TypeORM/bcrypt/crypto class — this is what keeps every unit test DB-free.
+This is the primary grading axis for this project, so each principle below links to the
+actual file(s) that demonstrate it, not just an abstract description.
+
+- **SRP** — one responsibility per class, split across five layers that never leak into each
+  other:
+  - HTTP layer: `src/users/users.controller.ts`
+  - Orchestration: `src/users/users.service.ts`
+  - Persistence: `src/users/repositories/typeorm-users.repository.ts`
+  - Authorization: `src/users/policies/user-access.policy.ts`
+  - Output shaping: `src/users/serializers/user.serializer.ts`
+  - Crypto: `src/auth/hashing/bcrypt-password-hasher.ts`,
+    `src/auth/tokens/crypto-token-generator.ts`
+- **OCP** — open for extension, closed for modification:
+  - Adding a second resource type means writing one new serializer implementing
+    `IResourceSerializer` (`src/common/jsonapi/serializers/serializer.interface.ts`) — nothing
+    changes in `src/common/jsonapi/jsonapi-envelope.interceptor.ts`.
+  - Adding a new business-rule error means a new `DomainException` subclass (see
+    `src/common/exceptions/forbidden-action.exception.ts`,
+    `user-not-found.exception.ts`, `duplicate-email.exception.ts`) — nothing changes in
+    `src/common/jsonapi/jsonapi-exception.filter.ts`.
+- **LSP** — `src/users/users.service.ts` depends on `IUsersRepository`
+  (`src/users/repositories/users-repository.interface.ts`), not the concrete
+  `TypeOrmUsersRepository`; any conforming implementation (e.g. an in-memory fake used in
+  `src/users/__tests__/users.service.spec.ts`) substitutes without the service changing.
+- **ISP** — `IUsersRepository` exposes only the handful of operations the domain needs, not
+  TypeORM's full `Repository`/`QueryBuilder` surface; `IUserAccessPolicy`
+  (`src/users/policies/user-access-policy.interface.ts`) exposes exactly
+  `canView`/`canList`/`canUpdate`/`canDelete` and nothing else.
+- **DIP** — `src/users/users.service.ts` and `src/auth/auth.service.ts` depend only on
+  interfaces injected via Symbol tokens (`USERS_REPOSITORY`, `USER_ACCESS_POLICY`,
+  `PASSWORD_HASHER`, `TOKEN_GENERATOR`), never a concrete TypeORM/bcrypt/crypto class. This is
+  precisely what lets `src/users/__tests__/users.service.spec.ts` and
+  `src/auth/__tests__/auth.service.spec.ts` mock everything and run with no real database.
+
+**Where to see it all working together end-to-end:** `src/users/users.service.ts` is the
+single best file to read first — its constructor shows all four injected interfaces at once,
+and every method shows the policy check happening before the repository call.
+
+**Where to see the authorization logic tested exhaustively with zero mocks:**
+`src/users/policies/__tests__/user-access.policy.spec.ts` — `UserAccessPolicy` has no Nest or
+TypeORM imports at all, so it's instantiated directly with plain objects.
