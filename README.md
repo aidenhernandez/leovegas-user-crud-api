@@ -149,7 +149,7 @@ envelope; errors come back as `{ "errors": [...] }`.
 
 | Method | Path          | Auth                          | Notes                                             |
 | ------ | ------------- | ------------------------------ | -------------------------------------------------- |
-| POST   | `/auth/login` | none                           | body: `{ email, password }` → `{ user, accessToken }` |
+| POST   | `/auth/login` | none                           | body: `{ email, password }` → JSON:API user resource with `meta.accessToken` |
 | POST   | `/users`      | optional                       | anonymous → self-registers as `USER`; ADMIN caller can set `role` |
 | GET    | `/users`      | ADMIN only                     | list all users                                      |
 | GET    | `/users/:id`  | self or ADMIN                  | non-ADMIN requesting another id gets `403`, not `404` |
@@ -157,7 +157,8 @@ envelope; errors come back as `{ "errors": [...] }`.
 | PUT    | `/users/:id`  | same as PATCH                  | aliased to the same handler (partial update either way) |
 | DELETE | `/users/:id`  | ADMIN only, not self            | no one can delete their own account, including ADMIN |
 
-Authenticate with `Authorization: Bearer <accessToken>` from the login response.
+Authenticate with `Authorization: Bearer <accessToken>`, using the token from
+`data.meta.accessToken` in the login response.
 
 ### Example: register, login, view self
 
@@ -169,7 +170,7 @@ curl -X POST localhost:3000/api/users \
 curl -X POST localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"alice@example.com","password":"password123"}'
-# => { "user": {...}, "accessToken": "..." }
+# => { "data": { "type": "users", "id": "...", "attributes": {...}, "meta": { "accessToken": "..." } } }
 
 curl localhost:3000/api/users/<alice-id> \
   -H "Authorization: Bearer <accessToken>"
@@ -195,7 +196,19 @@ curl localhost:3000/api/users/<alice-id> \
 
 `password` and `access_token` never appear in `attributes` — enforced twice, independently:
 the entity columns are `{ select: false }`, and the serializer explicitly whitelists which
-fields it reads.
+fields it reads. `POST /auth/login` returns the same shape, with the token attached under
+the resource object's `meta` member:
+
+```json
+{
+  "data": {
+    "type": "users",
+    "id": "82fcf9a3-8b6c-4f72-a15a-6259e5ab7a73",
+    "attributes": { "name": "Alice", "email": "alice@example.com", "role": "USER", "createdAt": "...", "updatedAt": "..." },
+    "meta": { "accessToken": "9f2c...e71a" }
+  }
+}
+```
 
 ### Error envelope
 
@@ -236,12 +249,25 @@ Validation failures (422) return one error per invalid field, each with a `sourc
 - **No one can delete their own account, including ADMIN.** A literal reading of the spec.
   An ADMIN *can*, however, change their own role via `PATCH` — the spec only restricts that
   for `USER` — documented and pinned by a dedicated test in `user-access.policy.spec.ts`.
-- **`JsonApiEnvelopeInterceptor` is scoped to `UsersController`, not global.** `POST
-  /auth/login` returns `{ user, accessToken }`, which isn't a single JSON:API resource object
-  — forcing it through the same envelope would require a special case that couples the
-  interceptor back to one route. The error filter, by contrast, *is* global: a uniform error
-  shape across the whole API (including auth errors) is a reasonable cross-cutting concern in
-  a way resource-enveloping isn't.
+- **A role change may never remove the last remaining ADMIN.** Deleting your own account is
+  blocked, but changing your own *role* was originally left wide open — which meant a sole
+  ADMIN demoting themselves to `USER` had no path back to ADMIN through the API at all. Fixed
+  by having `UsersService.update()` derive a `wouldRemoveLastAdmin` fact (via a new
+  `IUsersRepository.countByRole()`) and hand it to `UserAccessPolicy.canUpdate()` as a plain
+  boolean, the same way `isRoleChange` already works — the policy stays the single,
+  DB-agnostic source of truth for the decision; only the fact-gathering happens in the
+  service.
+- **`JsonApiEnvelopeInterceptor` is applied per-controller, not global.** Both
+  `UsersController` and `AuthController` opt in explicitly with `@UseInterceptors(...)`
+  rather than it being wired as an app-wide default — it stays resource-agnostic (it only
+  wraps whatever resource object a controller hands it in `data`), so nothing about the
+  interceptor itself needs to change as new resources are added. `POST /auth/login` returns
+  a `users` resource object like every other user-related endpoint; the access token rides
+  along as `data.meta.accessToken` — `meta` is a standard JSON:API resource-object member for
+  exactly this kind of "extra, non-attribute info," so the login response stays a real JSON:API
+  document instead of a one-off shape. The error filter, by contrast, *is* global: a uniform
+  error shape across the whole API (including auth errors) is a reasonable cross-cutting
+  concern in a way resource-enveloping isn't.
 - **Migrations, never `synchronize: true`.** More representative of how this would run in
   production.
 - **Unit tests only, no e2e.** The spec calls for unit tests; all service/policy/guard/

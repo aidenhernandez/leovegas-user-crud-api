@@ -66,8 +66,10 @@ export class UsersService {
     targetId: string,
     dto: UpdateUserDto,
   ): Promise<User> {
-    const isRoleChange = dto.role !== undefined;
-    if (!this.accessPolicy.canUpdate(requester, targetId, isRoleChange)) {
+    // Checked with isRoleChange=false first, before touching the repository:
+    // a non-owner, non-admin must get the same 403 whether or not targetId
+    // exists, so target existence can't be inferred from the response.
+    if (!this.accessPolicy.canUpdate(requester, targetId, false, false)) {
       throw new ForbiddenActionException(
         'You are not allowed to update this user',
       );
@@ -76,6 +78,39 @@ export class UsersService {
     const existing = await this.usersRepository.findById(targetId);
     if (!existing) {
       throw new UserNotFoundException(targetId);
+    }
+
+    // Only an actual change of value counts as a role change - resubmitting
+    // the current role (e.g. a full-representation PUT) must not trip the
+    // non-admin role-change restriction.
+    const isRoleChange = dto.role !== undefined && dto.role !== existing.role;
+
+    // Only moving a currently-ADMIN target off of ADMIN can possibly remove
+    // the last admin - a promotion, or a change to some other field, never
+    // can, so the count query only runs when it's actually relevant.
+    const isMovingOffAdmin =
+      isRoleChange && existing.role === Role.ADMIN && dto.role !== Role.ADMIN;
+    const wouldRemoveLastAdmin = isMovingOffAdmin
+      ? (await this.usersRepository.countByRole(Role.ADMIN)) <= 1
+      : false;
+
+    if (
+      isRoleChange &&
+      !this.accessPolicy.canUpdate(
+        requester,
+        targetId,
+        true,
+        wouldRemoveLastAdmin,
+      )
+    ) {
+      // canUpdate is still the sole authority on whether this is allowed;
+      // wouldRemoveLastAdmin is only reused here to pick a more specific
+      // message for a rejection we already know the reason for.
+      throw new ForbiddenActionException(
+        wouldRemoveLastAdmin
+          ? 'Cannot change the role of the last remaining administrator'
+          : 'You are not allowed to update this user',
+      );
     }
 
     if (dto.email && dto.email !== existing.email) {

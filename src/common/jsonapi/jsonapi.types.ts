@@ -4,6 +4,7 @@ export interface JsonApiResourceObject<TAttributes> {
   type: string;
   id: string;
   attributes: TAttributes;
+  meta?: Record<string, unknown>;
 }
 
 export interface JsonApiErrorSource {

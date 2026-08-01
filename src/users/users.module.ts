@@ -25,6 +25,6 @@ import { HashingModule } from '../auth/hashing/hashing.module';
       useClass: UserAccessPolicy,
     },
   ],
-  exports: [USERS_REPOSITORY],
+  exports: [USERS_REPOSITORY, UserSerializer],
 })
 export class UsersModule {}

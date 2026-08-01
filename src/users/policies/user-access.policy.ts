@@ -16,8 +16,20 @@ export class UserAccessPolicy implements IUserAccessPolicy {
     return requester.role === Role.ADMIN;
   }
 
-  canUpdate(requester: User, targetId: string, isRoleChange: boolean): boolean {
+  canUpdate(
+    requester: User,
+    targetId: string,
+    isRoleChange: boolean,
+    wouldRemoveLastAdmin: boolean,
+  ): boolean {
     if (isRoleChange && requester.role !== Role.ADMIN) {
+      return false;
+    }
+    // wouldRemoveLastAdmin is a fact the caller derived from the database
+    // (whether targetId is currently the sole ADMIN and this change would
+    // move them off ADMIN) - this class stays DB-agnostic and just applies
+    // the rule: never allow a role change that leaves zero admins.
+    if (isRoleChange && wouldRemoveLastAdmin) {
       return false;
     }
     return requester.role === Role.ADMIN || requester.id === targetId;

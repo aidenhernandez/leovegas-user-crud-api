@@ -24,6 +24,7 @@ describe('UsersService', () => {
       findByAccessToken: jest.fn(),
       findAll: jest.fn(),
       existsByEmail: jest.fn(),
+      countByRole: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       updateAccessToken: jest.fn(),
@@ -150,7 +151,7 @@ describe('UsersService', () => {
   });
 
   describe('update', () => {
-    it('flags a role field in the dto as a role change when consulting the policy', async () => {
+    it('forbids a non-owner, non-admin without consulting the repository (no id-existence leak)', async () => {
       accessPolicy.canUpdate.mockReturnValue(false);
 
       await expect(
@@ -159,8 +160,10 @@ describe('UsersService', () => {
       expect(accessPolicy.canUpdate).toHaveBeenCalledWith(
         expect.anything(),
         'target-id',
-        true,
+        false,
+        false,
       );
+      expect(repository.findById).not.toHaveBeenCalled();
     });
 
     it('does not flag an update without a role field as a role change', async () => {
@@ -173,6 +176,120 @@ describe('UsersService', () => {
       expect(accessPolicy.canUpdate).toHaveBeenCalledWith(
         expect.anything(),
         'target-id',
+        false,
+        false,
+      );
+      expect(accessPolicy.canUpdate).toHaveBeenCalledTimes(1);
+      expect(repository.countByRole).not.toHaveBeenCalled();
+    });
+
+    it('does not treat resubmitting the current role as a role change (e.g. a full-representation PUT)', async () => {
+      accessPolicy.canUpdate.mockReturnValue(true);
+      repository.findById.mockResolvedValue(buildUser({ role: Role.USER }));
+      repository.update.mockResolvedValue(buildUser());
+
+      await service.update(
+        buildUser({ id: 'target-id', role: Role.USER }),
+        'target-id',
+        {
+          name: 'New Name',
+          role: Role.USER,
+        },
+      );
+
+      expect(accessPolicy.canUpdate).toHaveBeenCalledTimes(1);
+      expect(accessPolicy.canUpdate).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'target-id',
+        true,
+        expect.anything(),
+      );
+      expect(repository.countByRole).not.toHaveBeenCalled();
+    });
+
+    it('blocks a non-admin from changing their own role to a different value', async () => {
+      accessPolicy.canUpdate.mockImplementation(
+        (_requester, _targetId, isRoleChange: boolean) => !isRoleChange,
+      );
+      repository.findById.mockResolvedValue(buildUser({ role: Role.USER }));
+
+      await expect(
+        service.update(
+          buildUser({ id: 'target-id', role: Role.USER }),
+          'target-id',
+          { role: Role.ADMIN },
+        ),
+      ).rejects.toThrow(ForbiddenActionException);
+    });
+
+    it('allows an admin to change another user role to a different value', async () => {
+      accessPolicy.canUpdate.mockReturnValue(true);
+      repository.findById.mockResolvedValue(buildUser({ role: Role.USER }));
+      repository.update.mockResolvedValue(buildUser());
+
+      await service.update(buildUser({ role: Role.ADMIN }), 'target-id', {
+        role: Role.ADMIN,
+      });
+
+      expect(accessPolicy.canUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        'target-id',
+        true,
+        false,
+      );
+      expect(repository.countByRole).not.toHaveBeenCalled();
+    });
+
+    it('does not query the admin count for a promotion (USER -> ADMIN)', async () => {
+      accessPolicy.canUpdate.mockReturnValue(true);
+      repository.findById.mockResolvedValue(buildUser({ role: Role.USER }));
+      repository.update.mockResolvedValue(buildUser());
+
+      await service.update(buildUser({ role: Role.ADMIN }), 'target-id', {
+        role: Role.ADMIN,
+      });
+
+      expect(repository.countByRole).not.toHaveBeenCalled();
+    });
+
+    it('blocks demoting the sole remaining admin, with a specific error message', async () => {
+      accessPolicy.canUpdate.mockImplementation(
+        (_requester, _targetId, isRoleChange: boolean) => !isRoleChange,
+      );
+      repository.findById.mockResolvedValue(buildUser({ role: Role.ADMIN }));
+      repository.countByRole.mockResolvedValue(1);
+
+      await expect(
+        service.update(buildUser({ role: Role.ADMIN }), 'target-id', {
+          role: Role.USER,
+        }),
+      ).rejects.toThrow(
+        'Cannot change the role of the last remaining administrator',
+      );
+      expect(repository.countByRole).toHaveBeenCalledWith(Role.ADMIN);
+      expect(accessPolicy.canUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        'target-id',
+        true,
+        true,
+      );
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it('allows demoting an admin when other admins still exist', async () => {
+      accessPolicy.canUpdate.mockReturnValue(true);
+      repository.findById.mockResolvedValue(buildUser({ role: Role.ADMIN }));
+      repository.countByRole.mockResolvedValue(2);
+      repository.update.mockResolvedValue(buildUser());
+
+      await service.update(buildUser({ role: Role.ADMIN }), 'target-id', {
+        role: Role.USER,
+      });
+
+      expect(accessPolicy.canUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        'target-id',
+        true,
         false,
       );
     });

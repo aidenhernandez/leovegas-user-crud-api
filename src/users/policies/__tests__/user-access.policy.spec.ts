@@ -35,28 +35,43 @@ describe('UserAccessPolicy', () => {
   describe('canUpdate', () => {
     it('allows a USER to update their own non-role fields', () => {
       const user = buildUser({ id: 'user-1', role: Role.USER });
-      expect(policy.canUpdate(user, 'user-1', false)).toBe(true);
+      expect(policy.canUpdate(user, 'user-1', false, false)).toBe(true);
     });
 
     it('forbids a USER from changing their own role', () => {
       const user = buildUser({ id: 'user-1', role: Role.USER });
-      expect(policy.canUpdate(user, 'user-1', true)).toBe(false);
+      expect(policy.canUpdate(user, 'user-1', true, false)).toBe(false);
     });
 
     it('forbids a USER from updating another user, role change or not', () => {
       const user = buildUser({ id: 'user-1', role: Role.USER });
-      expect(policy.canUpdate(user, 'user-2', false)).toBe(false);
-      expect(policy.canUpdate(user, 'user-2', true)).toBe(false);
+      expect(policy.canUpdate(user, 'user-2', false, false)).toBe(false);
+      expect(policy.canUpdate(user, 'user-2', true, false)).toBe(false);
     });
 
     it('allows an ADMIN to update another user, including their role', () => {
       const admin = buildUser({ id: 'admin-1', role: Role.ADMIN });
-      expect(policy.canUpdate(admin, 'user-2', true)).toBe(true);
+      expect(policy.canUpdate(admin, 'user-2', true, false)).toBe(true);
     });
 
     it('allows an ADMIN to change their own role (documented judgment call: the spec only restricts USER here)', () => {
       const admin = buildUser({ id: 'admin-1', role: Role.ADMIN });
-      expect(policy.canUpdate(admin, 'admin-1', true)).toBe(true);
+      expect(policy.canUpdate(admin, 'admin-1', true, false)).toBe(true);
+    });
+
+    it('forbids an ADMIN from a role change that would remove the last remaining admin, even on another user', () => {
+      const admin = buildUser({ id: 'admin-1', role: Role.ADMIN });
+      expect(policy.canUpdate(admin, 'user-2', true, true)).toBe(false);
+    });
+
+    it('forbids an ADMIN from demoting themselves when they are the sole admin', () => {
+      const admin = buildUser({ id: 'admin-1', role: Role.ADMIN });
+      expect(policy.canUpdate(admin, 'admin-1', true, true)).toBe(false);
+    });
+
+    it('ignores wouldRemoveLastAdmin when there is no role change at all', () => {
+      const admin = buildUser({ id: 'admin-1', role: Role.ADMIN });
+      expect(policy.canUpdate(admin, 'admin-1', false, true)).toBe(true);
     });
   });
 

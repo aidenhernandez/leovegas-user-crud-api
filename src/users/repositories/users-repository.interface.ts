@@ -29,6 +29,7 @@ export interface IUsersRepository {
   findByAccessToken(accessToken: string): Promise<User | null>;
   findAll(): Promise<User[]>;
   existsByEmail(email: string): Promise<boolean>;
+  countByRole(role: Role): Promise<number>;
   create(data: CreateUserData): Promise<User>;
   update(id: string, data: UpdateUserData): Promise<User>;
   updateAccessToken(id: string, accessToken: string): Promise<void>;
