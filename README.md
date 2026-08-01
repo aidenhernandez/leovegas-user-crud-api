@@ -27,6 +27,7 @@ src/
   config/       # env validation (Joi) + typed config
 migrations/     # TypeORM migrations
 scripts/        # seed-admin.ts
+docs/           # API_TESTING.md - full curl walkthrough of every endpoint/scenario
 ```
 
 Unit tests live in a `__tests__/` directory next to the files they cover (e.g.
@@ -159,6 +160,10 @@ envelope; errors come back as `{ "errors": [...] }`.
 
 Authenticate with `Authorization: Bearer <accessToken>`, using the token from
 `data.meta.accessToken` in the login response.
+
+For a full curl walkthrough of every endpoint and permission scenario (403-vs-404, the
+validation error shape, the last-admin lockout, the duplicate-email race, etc.), see
+[`docs/API_TESTING.md`](docs/API_TESTING.md).
 
 ### Example: register, login, view self
 
