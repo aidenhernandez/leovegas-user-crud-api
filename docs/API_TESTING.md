@@ -23,6 +23,17 @@ BASE=http://localhost:3000/api
 `jq` is used below to pull ids/tokens out of responses; it's optional, just convenient
 (`brew install jq` / `apt install jq`).
 
+**Ready-to-use credentials** — no setup beyond the commands above needed:
+
+- **ADMIN** (seeded by `npm run seed:admin`, from `.env.example`'s defaults):
+  `admin@leovegas.test` / `ChangeMe123!`
+- **USER**: there's no seeded regular user — register one with the very first curl command
+  in section 1 below (e.g. `alice@example.com` / `password123`), then log in with it in
+  section 2. That's the one extra step; everything else in this guide works as-is.
+
+(If you've changed `ADMIN_SEED_EMAIL`/`ADMIN_SEED_PASSWORD` in your own `.env`, use those
+values instead — the ones above are only what ships in `.env.example`.)
+
 ---
 
 ## 1. Registration (`POST /users`)
@@ -190,7 +201,7 @@ curl -s -w "\n[%{http_code}]\n" $BASE/users/00000000-0000-0000-0000-000000000000
 ```bash
 ADMIN_LOGIN=$(curl -s -X POST $BASE/auth/login \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"$ADMIN_SEED_EMAIL\",\"password\":\"$ADMIN_SEED_PASSWORD\"}")
+  -d '{"email":"admin@leovegas.test","password":"ChangeMe123!"}')
 ADMIN_TOKEN=$(echo "$ADMIN_LOGIN" | jq -r '.data.meta.accessToken')
 ADMIN_ID=$(echo "$ADMIN_LOGIN" | jq -r '.data.id')
 ```

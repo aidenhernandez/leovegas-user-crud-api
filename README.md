@@ -50,6 +50,11 @@ npm run start:dev
 
 The API is served under the `/api` prefix, e.g. `http://localhost:3000/api/users`.
 
+With `.env.example`'s defaults left as-is, that seeds an ADMIN at `admin@leovegas.test` /
+`ChangeMe123!` — log in with `POST /auth/login` to get a token immediately, no other setup
+needed. For a regular `USER`, register one via `POST /users` (see
+[docs/API_TESTING.md](docs/API_TESTING.md) section 1 for a ready-to-run example).
+
 ## Docker / MySQL
 
 MySQL runs as a single Docker Compose service named `mysql`, defined in
@@ -149,10 +154,8 @@ npm run seed:admin          # idempotent — safe to re-run
 ## CI
 
 `.github/workflows/ci.yml` runs lint, build, and the unit test suite (all DB-free, so no
-MySQL service container is needed) on every push/PR to `main`. It runs against GitHub's own
-Actions infrastructure, so it only executes once this repo has a GitHub remote and something
-is actually pushed to it — until then it exists as a checked-in, inspectable config, not a
-running pipeline.
+MySQL service container is needed) on every push/PR to `master`. It runs against GitHub's own
+Actions infrastructure and is a running pipeline.
 
 ## API overview
 
