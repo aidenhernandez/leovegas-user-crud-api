@@ -27,7 +27,8 @@ describe('UsersService', () => {
       countByRole: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
-      updateAccessToken: jest.fn(),
+      setAccessToken: jest.fn(),
+      clearAccessToken: jest.fn(),
       delete: jest.fn(),
     };
     accessPolicy = {
@@ -103,20 +104,38 @@ describe('UsersService', () => {
     it('forbids a non-admin from listing', async () => {
       accessPolicy.canList.mockReturnValue(false);
 
-      await expect(service.findAll(buildUser())).rejects.toThrow(
-        ForbiddenActionException,
-      );
+      await expect(
+        service.findAll(buildUser(), { page: 1, limit: 20 }),
+      ).rejects.toThrow(ForbiddenActionException);
       expect(repository.findAll).not.toHaveBeenCalled();
     });
 
-    it('returns all users for an admin', async () => {
+    it('returns a page of users for an admin', async () => {
       accessPolicy.canList.mockReturnValue(true);
-      const users = [buildUser(), buildUser({ id: 'user-2' })];
-      repository.findAll.mockResolvedValue(users);
+      const paginated = {
+        items: [buildUser(), buildUser({ id: 'user-2' })],
+        totalCount: 2,
+      };
+      repository.findAll.mockResolvedValue(paginated);
 
       await expect(
-        service.findAll(buildUser({ role: Role.ADMIN })),
-      ).resolves.toBe(users);
+        service.findAll(buildUser({ role: Role.ADMIN }), {
+          page: 1,
+          limit: 20,
+        }),
+      ).resolves.toBe(paginated);
+    });
+
+    it('converts page/limit into skip/take for the repository', async () => {
+      accessPolicy.canList.mockReturnValue(true);
+      repository.findAll.mockResolvedValue({ items: [], totalCount: 0 });
+
+      await service.findAll(buildUser({ role: Role.ADMIN }), {
+        page: 3,
+        limit: 10,
+      });
+
+      expect(repository.findAll).toHaveBeenCalledWith({ skip: 20, take: 10 });
     });
   });
 

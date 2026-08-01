@@ -7,6 +7,8 @@ import { DuplicateEmailException } from '../../common/exceptions/duplicate-email
 import {
   CreateUserData,
   IUsersRepository,
+  PaginatedUsers,
+  PaginationParams,
   UpdateUserData,
 } from './users-repository.interface';
 
@@ -39,12 +41,18 @@ export class TypeOrmUsersRepository implements IUsersRepository {
     return this.repository
       .createQueryBuilder('user')
       .addSelect('user.accessToken')
+      .addSelect('user.accessTokenExpiresAt')
       .where('user.accessToken = :accessToken', { accessToken })
       .getOne();
   }
 
-  findAll(): Promise<User[]> {
-    return this.repository.find();
+  async findAll(pagination: PaginationParams): Promise<PaginatedUsers> {
+    const [items, totalCount] = await this.repository.findAndCount({
+      skip: pagination.skip,
+      take: pagination.take,
+      order: { createdAt: 'ASC' },
+    });
+    return { items, totalCount };
   }
 
   async existsByEmail(email: string): Promise<boolean> {
@@ -111,8 +119,22 @@ export class TypeOrmUsersRepository implements IUsersRepository {
     return isDuplicateEntry ? new DuplicateEmailException(email ?? '') : error;
   }
 
-  async updateAccessToken(id: string, accessToken: string): Promise<void> {
-    await this.repository.update(id, { accessToken });
+  async setAccessToken(
+    id: string,
+    accessToken: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.repository.update(id, {
+      accessToken,
+      accessTokenExpiresAt: expiresAt,
+    });
+  }
+
+  async clearAccessToken(id: string): Promise<void> {
+    await this.repository.update(id, {
+      accessToken: null,
+      accessTokenExpiresAt: null,
+    });
   }
 
   async delete(id: string): Promise<void> {

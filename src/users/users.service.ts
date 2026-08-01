@@ -2,7 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import { User } from './entities/user.entity';
 import { Role } from './entities/role.enum';
 import { USERS_REPOSITORY } from './repositories/users-repository.interface';
-import type { IUsersRepository } from './repositories/users-repository.interface';
+import type {
+  IUsersRepository,
+  PaginatedUsers,
+} from './repositories/users-repository.interface';
 import { USER_ACCESS_POLICY } from './policies/user-access-policy.interface';
 import type { IUserAccessPolicy } from './policies/user-access-policy.interface';
 import { PASSWORD_HASHER } from '../auth/hashing/password-hasher.interface';
@@ -40,11 +43,15 @@ export class UsersService {
     });
   }
 
-  async findAll(requester: User): Promise<User[]> {
+  async findAll(
+    requester: User,
+    pagination: { page: number; limit: number },
+  ): Promise<PaginatedUsers> {
     if (!this.accessPolicy.canList(requester)) {
       throw new ForbiddenActionException('Only administrators can list users');
     }
-    return this.usersRepository.findAll();
+    const skip = (pagination.page - 1) * pagination.limit;
+    return this.usersRepository.findAll({ skip, take: pagination.limit });
   }
 
   async findOne(requester: User, targetId: string): Promise<User> {

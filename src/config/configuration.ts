@@ -10,6 +10,10 @@ export const configValidationSchema = Joi.object({
   DB_DATABASE: Joi.string().required(),
 
   BCRYPT_SALT_ROUNDS: Joi.number().default(10),
+  ACCESS_TOKEN_TTL_SECONDS: Joi.number().default(3600),
+
+  THROTTLE_TTL_MS: Joi.number().default(60000),
+  THROTTLE_LIMIT: Joi.number().default(30),
 
   ADMIN_SEED_EMAIL: Joi.string()
     .email({ tlds: { allow: false } })
@@ -27,6 +31,11 @@ export interface AppConfig {
     database: string;
   };
   bcryptSaltRounds: number;
+  accessTokenTtlSeconds: number;
+  throttle: {
+    ttlMs: number;
+    limit: number;
+  };
   adminSeed: {
     email: string;
     password: string;
@@ -43,6 +52,14 @@ export default (): AppConfig => ({
     database: process.env.DB_DATABASE ?? '',
   },
   bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS ?? '10', 10),
+  accessTokenTtlSeconds: parseInt(
+    process.env.ACCESS_TOKEN_TTL_SECONDS ?? '3600',
+    10,
+  ),
+  throttle: {
+    ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+    limit: parseInt(process.env.THROTTLE_LIMIT ?? '30', 10),
+  },
   adminSeed: {
     email: process.env.ADMIN_SEED_EMAIL ?? '',
     password: process.env.ADMIN_SEED_PASSWORD ?? '',

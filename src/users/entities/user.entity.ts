@@ -36,6 +36,14 @@ export class User {
   })
   accessToken!: string | null;
 
+  @Column({
+    name: 'access_token_expires_at',
+    type: 'datetime',
+    nullable: true,
+    select: false,
+  })
+  accessTokenExpiresAt!: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

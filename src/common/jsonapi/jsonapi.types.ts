@@ -7,6 +7,18 @@ export interface JsonApiResourceObject<TAttributes> {
   meta?: Record<string, unknown>;
 }
 
+export interface JsonApiPaginationMeta {
+  page: number;
+  limit: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export interface JsonApiCollectionDocument<TAttributes> {
+  data: JsonApiResourceObject<TAttributes>[];
+  meta: JsonApiPaginationMeta;
+}
+
 export interface JsonApiErrorSource {
   pointer?: string;
 }

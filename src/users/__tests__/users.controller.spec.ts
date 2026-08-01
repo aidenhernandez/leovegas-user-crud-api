@@ -50,20 +50,29 @@ describe('UsersController', () => {
     expect(serializer.serialize).toHaveBeenCalledWith(created);
   });
 
-  it('findAll() delegates to the service and serializes every result', async () => {
+  it('findAll() delegates to the service, serializes every result, and builds the pagination meta', async () => {
     const requester = buildUser({ role: Role.ADMIN });
     const users = [buildUser(), buildUser({ id: 'user-2' })];
-    usersService.findAll.mockResolvedValue(users);
+    usersService.findAll.mockResolvedValue({ items: users, totalCount: 42 });
     serializer.serialize.mockImplementation((user) => ({
       type: 'users',
       id: user.id,
       attributes: {} as never,
     }));
 
-    const result = await controller.findAll(requester);
+    const result = await controller.findAll(requester, { page: 2, limit: 10 });
 
-    expect(usersService.findAll).toHaveBeenCalledWith(requester);
-    expect(result).toHaveLength(2);
+    expect(usersService.findAll).toHaveBeenCalledWith(requester, {
+      page: 2,
+      limit: 10,
+    });
+    expect(result.data).toHaveLength(2);
+    expect(result.meta).toEqual({
+      page: 2,
+      limit: 10,
+      totalCount: 42,
+      totalPages: 5,
+    });
   });
 
   it('findOne() delegates to the service with the requester and target id', async () => {

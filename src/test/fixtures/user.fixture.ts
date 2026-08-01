@@ -17,6 +17,7 @@ export function buildUser(overrides: Partial<User> = {}): User {
     password: 'hashed-password',
     role: Role.USER,
     accessToken: null,
+    accessTokenExpiresAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,

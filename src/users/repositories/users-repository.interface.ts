@@ -17,6 +17,16 @@ export interface UpdateUserData {
   role?: Role;
 }
 
+export interface PaginationParams {
+  skip: number;
+  take: number;
+}
+
+export interface PaginatedUsers {
+  items: User[];
+  totalCount: number;
+}
+
 /**
  * Narrow persistence contract for the User aggregate. Deliberately excludes
  * the raw TypeORM Repository/QueryBuilder API (ISP) so callers only depend
@@ -27,11 +37,16 @@ export interface IUsersRepository {
   findByEmail(email: string): Promise<User | null>;
   findByEmailWithCredentials(email: string): Promise<User | null>;
   findByAccessToken(accessToken: string): Promise<User | null>;
-  findAll(): Promise<User[]>;
+  findAll(pagination: PaginationParams): Promise<PaginatedUsers>;
   existsByEmail(email: string): Promise<boolean>;
   countByRole(role: Role): Promise<number>;
   create(data: CreateUserData): Promise<User>;
   update(id: string, data: UpdateUserData): Promise<User>;
-  updateAccessToken(id: string, accessToken: string): Promise<void>;
+  setAccessToken(
+    id: string,
+    accessToken: string,
+    expiresAt: Date,
+  ): Promise<void>;
+  clearAccessToken(id: string): Promise<void>;
   delete(id: string): Promise<void>;
 }

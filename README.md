@@ -13,9 +13,12 @@ real database.
 - **MySQL** via **TypeORM** (repository pattern behind DI interfaces, migrations only —
   `synchronize` is always `false`)
 - **class-validator** / **class-transformer** for request validation
-- **bcrypt** for password hashing, an opaque persisted token (not JWT) for auth
+- **bcrypt** for password hashing, an opaque, expiring, persisted token (not JWT) for auth
+- **@nestjs/throttler** for per-route rate limiting
+- **@nestjs/swagger** for interactive API docs
 - **Jest** for unit tests (all dependencies mocked/faked — no real DB in specs)
 - **Docker Compose** for local MySQL
+- **GitHub Actions** for CI (lint/build/test on every push)
 
 ## Project layout
 
@@ -23,11 +26,12 @@ real database.
 src/
   common/       # cross-cutting: JSON:API envelope/filter/pipe, guards, decorators, domain exceptions
   users/        # entity, repository, access policy, service, controller, DTOs, serializer
-  auth/         # login, password hashing, token generation
+  auth/         # login, logout, password hashing, token generation
   config/       # env validation (Joi) + typed config
 migrations/     # TypeORM migrations
 scripts/        # seed-admin.ts
 docs/           # API_TESTING.md - full curl walkthrough of every endpoint/scenario
+.github/workflows/  # CI (lint/build/test)
 ```
 
 Unit tests live in a `__tests__/` directory next to the files they cover (e.g.
@@ -142,6 +146,14 @@ npm run migration:revert
 npm run seed:admin          # idempotent — safe to re-run
 ```
 
+## CI
+
+`.github/workflows/ci.yml` runs lint, build, and the unit test suite (all DB-free, so no
+MySQL service container is needed) on every push/PR to `main`. It runs against GitHub's own
+Actions infrastructure, so it only executes once this repo has a GitHub remote and something
+is actually pushed to it — until then it exists as a checked-in, inspectable config, not a
+running pipeline.
+
 ## API overview
 
 All request/response bodies use `Content-Type: application/json` or
@@ -150,20 +162,25 @@ envelope; errors come back as `{ "errors": [...] }`.
 
 | Method | Path          | Auth                          | Notes                                             |
 | ------ | ------------- | ------------------------------ | -------------------------------------------------- |
-| POST   | `/auth/login` | none                           | body: `{ email, password }` → JSON:API user resource with `meta.accessToken` |
-| POST   | `/users`      | optional                       | anonymous → self-registers as `USER`; ADMIN caller can set `role` |
-| GET    | `/users`      | ADMIN only                     | list all users                                      |
+| POST   | `/auth/login` | none (rate-limited: 5/min/IP)  | body: `{ email, password }` → JSON:API user resource with `meta.accessToken` |
+| POST   | `/auth/logout`| required                       | invalidates the caller's current access token       |
+| POST   | `/users`      | optional (rate-limited: 10/min/IP) | anonymous → self-registers as `USER`; ADMIN caller can set `role` |
+| GET    | `/users`      | ADMIN only                     | paginated: `?page=1&limit=20` (default; max `limit` 100) |
 | GET    | `/users/:id`  | self or ADMIN                  | non-ADMIN requesting another id gets `403`, not `404` |
 | PATCH  | `/users/:id`  | self (non-role fields) or ADMIN | changing `role` requires ADMIN                     |
 | PUT    | `/users/:id`  | same as PATCH                  | aliased to the same handler (partial update either way) |
 | DELETE | `/users/:id`  | ADMIN only, not self            | no one can delete their own account, including ADMIN |
 
 Authenticate with `Authorization: Bearer <accessToken>`, using the token from
-`data.meta.accessToken` in the login response.
+`data.meta.accessToken` in the login response. Tokens expire after
+`ACCESS_TOKEN_TTL_SECONDS` (default 1 hour) and are also invalidated immediately by
+`POST /auth/logout`.
 
 For a full curl walkthrough of every endpoint and permission scenario (403-vs-404, the
-validation error shape, the last-admin lockout, the duplicate-email race, etc.), see
-[`docs/API_TESTING.md`](docs/API_TESTING.md).
+validation error shape, the last-admin lockout, the duplicate-email race, rate limiting,
+pagination, etc.), see [`docs/API_TESTING.md`](docs/API_TESTING.md). For an interactive,
+try-it-in-the-browser reference, see [Interactive API docs](#interactive-api-docs-swagger)
+below.
 
 ### Example: register, login, view self
 
@@ -234,6 +251,35 @@ Validation failures (422) return one error per invalid field, each with a `sourc
 }
 ```
 
+Rate-limited requests (429) come back the same way, via Nest's built-in `ThrottlerException`:
+
+```json
+{ "errors": [{ "status": "429", "title": "ThrottlerException", "detail": "ThrottlerException: Too Many Requests" }] }
+```
+
+### Pagination
+
+`GET /users` accepts `?page=` (default `1`) and `?limit=` (default `20`, max `100`), and
+returns pagination info as a top-level `meta` member alongside `data`:
+
+```json
+{
+  "data": [ { "type": "users", "id": "...", "attributes": { ... } } ],
+  "meta": { "page": 2, "limit": 3, "totalCount": 11, "totalPages": 4 }
+}
+```
+
+## Interactive API docs (Swagger)
+
+With the server running, an interactive OpenAPI/Swagger UI is available at
+`http://localhost:3000/api/docs` — every endpoint, request DTO, and the bearer-auth scheme
+are documented there and can be tried directly from the browser (use the "Authorize" button
+with a token from `POST /auth/login`). The raw OpenAPI document is at `/api/docs-json`.
+Note that responses shown there reflect the request DTOs faithfully, but actual response
+*bodies* are the hand-rolled JSON:API envelope described above (Swagger doesn't model that
+dynamic per-request shape) — `docs/API_TESTING.md` is the source of truth for response
+shapes.
+
 ## Design decisions worth calling out
 
 - **Opaque token, not JWT.** `access_token` is a column on the `User` row (per the spec's
@@ -272,7 +318,30 @@ Validation failures (422) return one error per invalid field, each with a `sourc
   exactly this kind of "extra, non-attribute info," so the login response stays a real JSON:API
   document instead of a one-off shape. The error filter, by contrast, *is* global: a uniform
   error shape across the whole API (including auth errors) is a reasonable cross-cutting
-  concern in a way resource-enveloping isn't.
+  concern in a way resource-enveloping isn't. `GET /users`' pagination `meta` needed a
+  top-level sibling to `data` rather than a per-resource one, so the interceptor gained one
+  small rule: a controller can pre-build the *whole* envelope (`{ data, meta }`) and the
+  interceptor passes it through unchanged instead of wrapping it a second time — everything
+  else about it (resource-agnostic, no per-resource-type branching) is untouched.
+- **Access tokens expire, and can be explicitly invalidated.** A token issued by
+  `POST /auth/login` is only valid for `ACCESS_TOKEN_TTL_SECONDS` (default 1 hour, tracked
+  via a new `access_token_expires_at` column) and `POST /auth/logout` clears it immediately.
+  Originally there was no expiry and no logout at all — a leaked or forgotten token stayed
+  valid forever, with no way to revoke it short of another login overwriting it. `validateToken`
+  checks the expiry alongside the token lookup, so an expired token fails the same way an
+  unknown one does (`401`, same message) rather than needing a separate code path.
+- **Rate limiting is layered: a generous global default, tighter per-route overrides.**
+  `ThrottlerGuard` runs *before* `BearerTokenGuard` in the global guard order (registered
+  first), so an excessive request is rejected before any token lookup happens at all.
+  `POST /auth/login` (5/min/IP) and `POST /users` (10/min/IP) get stricter, explicit
+  `@Throttle()` overrides — login is the brute-force target, registration is the
+  duplicate-email-probing/spam target — while every other route falls back to the global
+  default (30/min/IP).
+- **`GET /users` pagination lives in the service, not the repository or controller.**
+  `UsersController` only validates and forwards `page`/`limit`; `UsersService.findAll()`
+  converts them into `skip`/`take` (persistence-appropriate terms) before calling
+  `IUsersRepository.findAll()`, which uses TypeORM's `findAndCount()` to get the page and
+  the total count in one query rather than two round trips.
 - **Migrations, never `synchronize: true`.** More representative of how this would run in
   production.
 - **Unit tests only, no e2e.** The spec calls for unit tests; all service/policy/guard/

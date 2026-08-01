@@ -1,4 +1,5 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { User } from '../users/entities/user.entity';
 import { USERS_REPOSITORY } from '../users/repositories/users-repository.interface';
 import type { IUsersRepository } from '../users/repositories/users-repository.interface';
@@ -13,6 +14,7 @@ export interface LoginResult {
 }
 
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password';
+const INVALID_OR_EXPIRED_TOKEN_MESSAGE = 'Invalid or expired access token';
 
 @Injectable()
 export class AuthService {
@@ -21,6 +23,7 @@ export class AuthService {
     private readonly usersRepository: IUsersRepository,
     @Inject(PASSWORD_HASHER) private readonly passwordHasher: IPasswordHasher,
     @Inject(TOKEN_GENERATOR) private readonly tokenGenerator: ITokenGenerator,
+    private readonly configService: ConfigService,
   ) {}
 
   async login(email: string, password: string): Promise<LoginResult> {
@@ -38,7 +41,10 @@ export class AuthService {
     }
 
     const accessToken = this.tokenGenerator.generate();
-    await this.usersRepository.updateAccessToken(user.id, accessToken);
+    const ttlSeconds =
+      this.configService.get<number>('accessTokenTtlSeconds') ?? 3600;
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+    await this.usersRepository.setAccessToken(user.id, accessToken, expiresAt);
 
     const { password: _password, ...userWithoutPassword } = user;
     return { user: userWithoutPassword as User, accessToken };
@@ -46,9 +52,17 @@ export class AuthService {
 
   async validateToken(accessToken: string): Promise<User> {
     const user = await this.usersRepository.findByAccessToken(accessToken);
-    if (!user) {
-      throw new UnauthorizedException('Invalid or expired access token');
+    if (
+      !user ||
+      !user.accessTokenExpiresAt ||
+      user.accessTokenExpiresAt.getTime() <= Date.now()
+    ) {
+      throw new UnauthorizedException(INVALID_OR_EXPIRED_TOKEN_MESSAGE);
     }
     return user;
+  }
+
+  async logout(userId: string): Promise<void> {
+    await this.usersRepository.clearAccessToken(userId);
   }
 }

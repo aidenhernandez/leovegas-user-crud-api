@@ -267,3 +267,86 @@ curl -s -w "\n[%{http_code}]\n" -X PATCH $BASE/users/$ADMIN_ID \
   -d '{"role":"USER"}'
 # => {"errors":[{"status":"403","title":"Forbidden","detail":"Cannot change the role of the last remaining administrator"}]}
 ```
+
+---
+
+## 7. Logout and token expiry
+
+**Logout invalidates the current token immediately (204), and the same token then fails (401):**
+
+```bash
+curl -s -w "\n[%{http_code}]\n" -X POST $BASE/auth/logout -H "Authorization: Bearer $ALICE_TOKEN"
+# => 204
+
+curl -s -w "\n[%{http_code}]\n" $BASE/users/$ALICE_ID -H "Authorization: Bearer $ALICE_TOKEN"
+# => {"errors":[{"status":"401","title":"Unauthorized","detail":"Invalid or expired access token"}]}
+```
+
+**Tokens also expire on their own after `ACCESS_TOKEN_TTL_SECONDS`** (default 3600 = 1 hour).
+To see this without waiting an hour, start the app with a short TTL for testing:
+
+```bash
+ACCESS_TOKEN_TTL_SECONDS=3 npm run start:dev
+```
+
+```bash
+LOGIN=$(curl -s -X POST $BASE/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"alice@example.com","password":"password123"}')
+TOKEN=$(echo "$LOGIN" | jq -r '.data.meta.accessToken')
+
+curl -s -w " [%{http_code}]\n" -o /dev/null $BASE/users/$ALICE_ID -H "Authorization: Bearer $TOKEN"
+# => 200 (still valid)
+
+sleep 4
+
+curl -s -w "\n[%{http_code}]\n" $BASE/users/$ALICE_ID -H "Authorization: Bearer $TOKEN"
+# => 401, same "Invalid or expired access token" message - an expired token and an unknown
+# token are indistinguishable to the client, on purpose
+```
+
+---
+
+## 8. Rate limiting
+
+`POST /auth/login` is limited to 5 requests/minute/IP, `POST /users` to 10/minute/IP; every
+other route falls back to a global default of 30/minute/IP. Limits are enforced by
+`ThrottlerGuard`, which runs *before* authentication in the global guard order.
+
+```bash
+for i in $(seq 1 7); do
+  curl -s -o /dev/null -w "attempt $i: [%{http_code}]\n" -X POST $BASE/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"nobody@example.com","password":"wrongpassword"}'
+done
+# first 5 (per rolling 60s window, across *all* recent requests from this IP - including
+# any earlier logins in this walkthrough) => 401 (wrong credentials, but not blocked)
+# once the limit is hit => 429
+```
+
+```json
+{"errors":[{"status":"429","title":"ThrottlerException","detail":"ThrottlerException: Too Many Requests"}]}
+```
+
+Note the limit is per IP across *all* recent requests to that route within the window, not
+per test run - if you've already logged in a few times in the last minute while working
+through this guide, you'll hit `429` sooner than expect.
+
+---
+
+## 9. Pagination
+
+`GET /users` accepts `?page=` (default `1`) and `?limit=` (default `20`, max `100`):
+
+```bash
+curl -s $BASE/users -H "Authorization: Bearer $ADMIN_TOKEN" | jq '.meta'
+# => {"page":1,"limit":20,"totalCount":11,"totalPages":1}
+
+curl -s "$BASE/users?page=2&limit=3" -H "Authorization: Bearer $ADMIN_TOKEN" | jq '.meta, [.data[].id]'
+# => distinct rows from page=1, and meta.totalPages reflects the smaller page size
+
+curl -s -w "\n[%{http_code}]\n" "$BASE/users?limit=500" -H "Authorization: Bearer $ADMIN_TOKEN"
+# => 422, {"detail":"limit must not be greater than 100", "source":{"pointer":"/limit"}}
+
+curl -s -w "\n[%{http_code}]\n" "$BASE/users?page=0" -H "Authorization: Bearer $ADMIN_TOKEN"
+# => 422, {"detail":"page must not be less than 1", "source":{"pointer":"/page"}}
+```
